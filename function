@@ -1,0 +1,47 @@
+function(dependent_variable, independent_variables, data, cluster_variable = "COUNTRYCODE") {
+  # Construct formula for logistic regression
+  formula <- as.formula(paste(dependent_variable, "~ ."))
+  
+  # Fit the logistic regression model
+  model <- lrm(formula, data = data[, c(dependent_variable, independent_variables)], y = TRUE, x = TRUE)
+  
+  bp_test <- bptest(model)
+  
+  # Check for heteroscedasticity
+  if (bptest(model)$p.value < 0.05) {
+    cat("Heteroscedasticity detected. Correcting...\n")
+    # Correct for heteroscedasticity
+    robust_results <- robcov(model, cluster = data[[cluster_variable]])
+  } else {
+    cat("No heteroscedasticity detected.\n")
+    robust_results <- model
+  }
+  
+  # Calculate VIF
+  vif_values <- vif(robust_results)
+  
+  # Compute correlation matrix
+  cor_matrix <- cor(as.data.frame(lapply(data[, independent_variables], function(x) if(is.factor(x)) as.numeric(x) else x)), use = "pairwise.complete.obs")
+  
+  # Extract coefficients and variance-covariance matrix
+  b <- coef(robust_results)
+  Sigma <- vcov(robust_results)
+  
+  # Compute log-odds ratios and confidence intervals
+  coef_ci <- data.frame(variable  = colnames(robust_results$var),
+                        OR        = exp(robust_results$coefficients),
+                        OR_lower  = exp(robust_results$coefficients + qnorm(0.025) * sqrt(diag(robust_results$var))),
+                        OR_upper  = exp(robust_results$coefficients + qnorm(0.975) * sqrt(diag(robust_results$var))),
+                        row.names = NULL)
+  
+  # Save the fitted model
+  saveRDS(model, file = "fitted_model.rds")
+  
+  # Save the results
+  saveRDS(list(robust_results = robust_results, coef_ci = coef_ci, bp_test = bp_test,
+               vif = vif_values, cor_matrix = cor_matrix), file = "results.rds")
+  
+  # Return the fitted model and results
+  return(list(model = model, robust_results = robust_results, coef_ci = coef_ci, bp_test = bp_test,
+              vif = vif_values, cor_matrix = cor_matrix))
+}
